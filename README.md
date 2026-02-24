@@ -9,6 +9,8 @@ This project provides a minimal Python agent built with LangChain.
 - Basic tools included:
   - `utc_time`
   - `calculator`
+  - `current_weather` (current conditions by location)
+  - `weather_forecast` (hourly forecast for next 24 hours)
 
 ## Setup
 
@@ -65,3 +67,14 @@ python agent.py --provider ollama --model qwen2.5:7b --ollama-base-url http://19
 
 - Bedrock model IDs vary by region/account access.
 - Ollama model names depend on models pulled into your Ollama instance.
+- Weather tools use Open-Meteo APIs (no API key required).
+- Weather output is metric: `°C` and `m/s`.
+
+## Weather tool prompts
+
+Examples:
+
+```bash
+python agent.py --prompt "What is the current weather in Berlin?"
+python agent.py --prompt "Give me the hourly weather forecast for the next 24 hours in Tokyo."
+```

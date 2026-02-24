@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 import argparse
 import ast
+import json
 import operator
 import os
 from datetime import datetime, timezone
 from typing import Callable, Dict
+from urllib.error import URLError
+from urllib.parse import urlencode
+from urllib.request import urlopen
 
 from dotenv import load_dotenv
 from langchain.agents import create_agent
@@ -31,6 +35,37 @@ _ALLOWED_UNARY_OPS: Dict[type, Callable[[float], float]] = {
     ast.USub: operator.neg,
 }
 
+_WMO_WEATHER_CODES = {
+    0: "Clear sky",
+    1: "Mainly clear",
+    2: "Partly cloudy",
+    3: "Overcast",
+    45: "Fog",
+    48: "Depositing rime fog",
+    51: "Light drizzle",
+    53: "Moderate drizzle",
+    55: "Dense drizzle",
+    56: "Light freezing drizzle",
+    57: "Dense freezing drizzle",
+    61: "Slight rain",
+    63: "Moderate rain",
+    65: "Heavy rain",
+    66: "Light freezing rain",
+    67: "Heavy freezing rain",
+    71: "Slight snow fall",
+    73: "Moderate snow fall",
+    75: "Heavy snow fall",
+    77: "Snow grains",
+    80: "Slight rain showers",
+    81: "Moderate rain showers",
+    82: "Violent rain showers",
+    85: "Slight snow showers",
+    86: "Heavy snow showers",
+    95: "Thunderstorm",
+    96: "Thunderstorm with slight hail",
+    99: "Thunderstorm with heavy hail",
+}
+
 
 def _safe_eval_math(expr: str) -> float:
     parsed = ast.parse(expr, mode="eval")
@@ -49,6 +84,36 @@ def _safe_eval_math(expr: str) -> float:
     return _eval(parsed)
 
 
+def _fetch_json(url: str) -> dict:
+    with urlopen(url, timeout=10) as response:
+        payload = response.read().decode("utf-8")
+    return json.loads(payload)
+
+
+def _wmo_description(code: int | None) -> str:
+    if code is None:
+        return "Unknown"
+    return _WMO_WEATHER_CODES.get(code, f"Unknown ({code})")
+
+
+def _resolve_location(location: str) -> dict:
+    query = urlencode({"name": location, "count": 1, "language": "en", "format": "json"})
+    url = f"https://geocoding-api.open-meteo.com/v1/search?{query}"
+    payload = _fetch_json(url)
+    results = payload.get("results") or []
+    if not results:
+        raise ValueError(f"Location not found: {location}")
+    top = results[0]
+    city = top.get("name", location)
+    country = top.get("country")
+    display_name = f"{city}, {country}" if country else city
+    return {
+        "name": display_name,
+        "latitude": top["latitude"],
+        "longitude": top["longitude"],
+    }
+
+
 @tool
 def utc_time(_: str = "") -> str:
     """Return current UTC time in ISO-8601 format."""
@@ -63,6 +128,84 @@ def calculator(expression: str) -> str:
         if result.is_integer():
             return str(int(result))
         return str(result)
+    except Exception as exc:
+        return f"Error: {exc}"
+
+
+@tool
+def current_weather(location: str) -> str:
+    """Get the current weather for a location (metric units)."""
+    try:
+        resolved = _resolve_location(location)
+        query = urlencode(
+            {
+                "latitude": resolved["latitude"],
+                "longitude": resolved["longitude"],
+                "current": "temperature_2m,wind_speed_10m,weather_code",
+                "timezone": "auto",
+            }
+        )
+        url = f"https://api.open-meteo.com/v1/forecast?{query}"
+        payload = _fetch_json(url)
+        current = payload.get("current", {})
+        temp = current.get("temperature_2m")
+        wind = current.get("wind_speed_10m")
+        code = current.get("weather_code")
+        time_value = current.get("time", "unknown")
+
+        if temp is None or wind is None:
+            raise ValueError("Weather data unavailable for the requested location.")
+
+        description = _wmo_description(code)
+        return (
+            f"Current weather for {resolved['name']}:\n"
+            f"- Time: {time_value}\n"
+            f"- Condition: {description}\n"
+            f"- Temperature: {temp}°C\n"
+            f"- Wind: {wind} m/s"
+        )
+    except (ValueError, KeyError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+        return f"Error: {exc}"
+    except Exception as exc:
+        return f"Error: {exc}"
+
+
+@tool
+def weather_forecast(location: str) -> str:
+    """Get hourly weather forecast for the next 24 hours for a location (metric units)."""
+    try:
+        resolved = _resolve_location(location)
+        query = urlencode(
+            {
+                "latitude": resolved["latitude"],
+                "longitude": resolved["longitude"],
+                "hourly": "temperature_2m,precipitation_probability,wind_speed_10m,weather_code",
+                "forecast_hours": 24,
+                "timezone": "auto",
+            }
+        )
+        url = f"https://api.open-meteo.com/v1/forecast?{query}"
+        payload = _fetch_json(url)
+        hourly = payload.get("hourly", {})
+        times = hourly.get("time") or []
+        temperatures = hourly.get("temperature_2m") or []
+        precipitations = hourly.get("precipitation_probability") or []
+        winds = hourly.get("wind_speed_10m") or []
+        codes = hourly.get("weather_code") or []
+
+        count = min(len(times), len(temperatures), len(precipitations), len(winds), len(codes), 24)
+        if count == 0:
+            raise ValueError("Forecast data unavailable for the requested location.")
+
+        lines = [f"Hourly forecast for {resolved['name']} (next {count} hours):"]
+        for i in range(count):
+            lines.append(
+                f"- {times[i]}: {_wmo_description(codes[i])}, {temperatures[i]}°C, "
+                f"precip {precipitations[i]}%, wind {winds[i]} m/s"
+            )
+        return "\n".join(lines)
+    except (ValueError, KeyError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+        return f"Error: {exc}"
     except Exception as exc:
         return f"Error: {exc}"
 
@@ -93,7 +236,7 @@ def build_agent(provider: str, model: str, ollama_base_url: str, aws_region: str
         aws_region=aws_region,
     )
 
-    tools = [utc_time, calculator]
+    tools = [utc_time, calculator, current_weather, weather_forecast]
     return create_agent(
         model=llm,
         tools=tools,
