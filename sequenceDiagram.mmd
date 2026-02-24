@@ -1,0 +1,23 @@
+sequenceDiagram
+    participant User
+    participant Main as main.py
+    participant Runtime as agent_runtime.py
+    participant Tool as current_weather.py/weather_forecast.py
+    participant FastMCP as FastMCP Client
+    participant MCP as MCP Weather Service
+
+    User->>Main: Ask weather question
+    Main->>Runtime: invoke_agent(prompt)
+    Runtime->>Tool: call selected weather tool
+    Tool->>Tool: read MCP_SERVER_URL
+    alt MCP_SERVER_URL is set
+        Tool->>FastMCP: call_tool(name, {location})
+        FastMCP->>MCP: MCP request
+        MCP-->>FastMCP: tool result
+        FastMCP-->>Tool: normalized response
+    else MCP_SERVER_URL not set
+        Tool->>Tool: fallback to Open-Meteo HTTP path
+    end
+    Tool-->>Runtime: weather result
+    Runtime-->>Main: final answer text
+    Main-->>User: Response

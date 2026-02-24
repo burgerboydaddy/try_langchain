@@ -1,0 +1,15 @@
+flowchart TD
+    U[User Prompt] --> M[main.py]
+    M --> AR[src/app/agent_runtime.py]
+    AR --> LLM[LLM Provider\nOllama or Bedrock]
+    AR --> TR[Tool Registry\nsrc/app/tools/__init__.py]
+    TR --> T1[utc_time.py]
+    TR --> T2[calculator.py]
+    TR --> T3[current_weather.py]
+    TR --> T4[weather_forecast.py]
+    T3 --> W1[Open-Meteo API]
+    T4 --> W1
+    T3 -. MCP_SERVER_URL set .-> MCP[FastMCP Client]
+    T4 -. MCP_SERVER_URL set .-> MCP
+    MCP --> MS[MCP Weather Service]
+    AR --> R[Final Response]
