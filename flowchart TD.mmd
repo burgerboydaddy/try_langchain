@@ -7,8 +7,13 @@ flowchart TD
     TR --> T2[calculator.py]
     TR --> T3[current_weather.py]
     TR --> T4[weather_forecast.py]
+    TR --> T5[stock_data.py]
+    TR --> T6[transcribe_audio.py]
     T3 --> W1[Open-Meteo API]
     T4 --> W1
+    T5 --> YF[Yahoo Finance API]
+    T6 --> LLM
+    T6 --> D[diary/*.md]
     T3 -. MCP_SERVER_URL set .-> MCP[FastMCP Client]
     T4 -. MCP_SERVER_URL set .-> MCP
     MCP --> MS[MCP Weather Service]

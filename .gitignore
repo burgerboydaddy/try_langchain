@@ -205,3 +205,8 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+.gemini/settings.json
+diary/
+test_recordings/
+diary/2026-02-24T204629.md
+test_recordings/Recording.wav

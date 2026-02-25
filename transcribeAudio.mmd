@@ -1,0 +1,32 @@
+sequenceDiagram
+    participant User
+    participant Main as main.py
+    participant Runtime as agent_runtime.py
+    participant Tool as transcribe_audio.py
+    participant LLM1 as openai-whisper (local)
+    participant LLM2 as Ollama MARKDOWN_MODEL
+    participant LLM as Bedrock LLM
+    participant FS as diary/ (filesystem)
+
+    User->>Main: "Transcribe recording.wav"
+    Main->>Runtime: invoke_agent(prompt)
+    Runtime->>Tool: transcribe_audio("recording.wav")
+    Tool->>Tool: validate .wav file exists
+    Tool->>Tool: read & base64-encode audio bytes
+    Tool->>Tool: capture current datetime
+
+    alt provider == ollama
+        Tool->>LLM1: whisper.load_model(TRANSCRIPT_MODEL) + transcribe
+        LLM1-->>Tool: raw verbatim transcript text
+        Tool->>LLM2: HumanMessage ["Convert this transcript into clean Markdown"]
+        LLM2-->>Tool: formatted Markdown body
+    else provider == bedrock
+        Tool->>LLM: HumanMessage [transcription+formatting prompt + audio source block]
+        LLM-->>Tool: formatted Markdown body
+    end
+
+    Tool->>Tool: build Markdown document\n(header: date, time + Markdown body)
+    Tool->>FS: write diary/<yyyy-MM-ddTHHmmss>.md
+    Tool-->>Runtime: "Transcript saved to: diary/..."
+    Runtime-->>Main: final answer text
+    Main-->>User: Response
