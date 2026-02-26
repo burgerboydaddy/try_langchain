@@ -35,7 +35,17 @@ def build_agent(provider: str, model: str, ollama_base_url: str, aws_region: str
     return create_agent(
         model=llm,
         tools=TOOLS,
-        system_prompt="You are a helpful assistant. Use tools when needed and keep answers concise.",
+        # system_prompt="You are a helpful assistant. Use tools when needed and keep answers concise.",
+        system_prompt="""
+            You are a helpful assistant with access to a set of tools.
+            You MUST use the appropriate tool whenever the user asks you to perform a task 
+            that one of your tools can handle — do NOT explain how to do it manually or suggest 
+            third-party libraries. 
+            For example, if the user asks you to transcribe an audio file, call the 
+            transcribe_audio tool immediately with the provided file path. 
+            Keep answers concise.
+            """,
+        # debug=True,
         debug=verbose,
     )
 

@@ -50,6 +50,7 @@ def _whisper_transcribe(wav_path: Path, model_size: str) -> str:
     size = model_size.strip() or "base"
     model = whisper.load_model(size)
     result = model.transcribe(str(wav_path), fp16=False)
+    # print("Transcription: ", result["text"])
     return result["text"].strip()
 
 
@@ -71,7 +72,6 @@ def transcribe_audio(wav_file_path: str) -> str:
         return f"Error: file not found: {wav_file_path}"
     if wav_path.suffix.lower() != ".wav":
         return f"Error: expected a .wav file, got '{wav_path.suffix}'"
-
     # --- capture current date/time ---
     now = datetime.now()
     # "Tuesday, February 24, 2026"  (%-d strips the leading zero on Linux/macOS)
@@ -79,24 +79,26 @@ def transcribe_audio(wav_file_path: str) -> str:
     time_str = now.strftime("%H:%M:%S")
     file_stem = now.strftime("%Y-%m-%dT%H%M%S")
 
+    # Step 1: transcribe audio locally with openai-whisper.
+    # TRANSCRIPT_MODEL selects the whisper model size (tiny/base/small/medium/large).
+    whisper_size = os.getenv("TRANSCRIPT_MODEL", "base")
+    raw_text = _whisper_transcribe(wav_path, whisper_size)
+    print(f"Raw transcript:\n{raw_text}\n")
+    # Step 2: convert raw transcript to clean Markdown with MARKDOWN_MODEL
+    md_prompt = (
+        "Convert this text into clean Markdown. "
+        "Do not translate or change any of the content; only fix grammar and formatting. "
+        "Text is in English, but may contain grammar mistakes, filler words, and disfluencies. "
+        "Return only the transcribed and grammar-corrected content with no additional commentary or analysis.\n\n"
+        
+        f"{raw_text}"
+    )
     # --- call the LLM(s) ---
     provider = os.getenv("PROVIDER", "bedrock").lower()
-
     if provider == "ollama":
-        # Step 1: transcribe audio locally with openai-whisper.
-        # TRANSCRIPT_MODEL selects the whisper model size (tiny/base/small/medium/large).
-        whisper_size = os.getenv("TRANSCRIPT_MODEL", "base")
-        raw_text = _whisper_transcribe(wav_path, whisper_size)
-
-        # Step 2: convert raw transcript to clean Markdown with MARKDOWN_MODEL
-        markdown_model = os.getenv("MARKDOWN_MODEL") or os.getenv("MODEL")
+        markdown_model = os.getenv("MARKDOWN_MODEL") or os.getenv("MODEL")    
         llm_markdown = _build_llm(model_override=markdown_model)
 
-        md_prompt = (
-            "Convert this transcript into clean Markdown. "
-            "Preserve the meaning exactly; only improve formatting and readability.\n\n"
-            f"{raw_text}"
-        )
         md_response = llm_markdown.invoke([HumanMessage(content=md_prompt)])
         body = (
             md_response.content
@@ -105,31 +107,9 @@ def transcribe_audio(wav_file_path: str) -> str:
         ).strip()
 
     else:
-        # Bedrock: single multimodal call handles both transcription and formatting
-        audio_b64 = base64.b64encode(wav_path.read_bytes()).decode("utf-8")
         llm = _build_llm()
-        audio_block = {
-            "type": "audio",
-            "source": {
-                "type": "base64",
-                "media_type": "audio/wav",
-                "data": audio_b64,
-            },
-        }
-        transcription_prompt = (
-            "Transcribe the audio file provided below and format the result as clean Markdown. "
-            "Return only the transcribed content with no additional commentary or analysis."
-        )
-        response = llm.invoke(
-            [
-                HumanMessage(
-                    content=[
-                        {"type": "text", "text": transcription_prompt},
-                        audio_block,
-                    ]
-                )
-            ]
-        )
+
+        response = llm.invoke([HumanMessage(content=md_prompt)])
         body = (
             response.content
             if isinstance(response.content, str)
@@ -138,10 +118,9 @@ def transcribe_audio(wav_file_path: str) -> str:
 
     # --- build Markdown document ---
     markdown = (
-        f"# Transcript\n\n"
-        f"**Date:** {date_str}  \n"
-        f"**Time:** {time_str}\n\n"
-        f"---\n\n"
+        f"# Captain's Log: {date_str}\n\n"
+        f"*This log was automatically transcribed from an audio recording on {date_str} at {time_str}.*\n\n"
+        f"\n\n"
         f"{body}\n"
     )
 
